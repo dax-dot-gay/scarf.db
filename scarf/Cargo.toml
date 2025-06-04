@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.98"
 chrono = { version = "0.4.41", features = ["serde"] }
+derive_builder = "0.20.2"
 redb = "2.6.0"
 rmp = "0.8.14"
 rmp-serde = "1.3.0"
 rmpv = { version = "1.3.0", features = ["with-serde"] }
 serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
 uuid = { version = "1.17.0", features = ["v4", "fast-rng", "serde"] }
