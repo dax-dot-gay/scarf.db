@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Unhandled redb error: {0:?}")]
@@ -11,11 +13,18 @@ pub enum Error {
 
     #[error("Unknown table name {0}")]
     UnknownTableName(String),
+
+    #[error("More than one strong reference to this Arc exists: {0} strong, {1} weak.")]
+    ArcReferences(usize, usize)
 }
 
 impl Error {
     pub fn unknown_table(name: impl AsRef<str>) -> Self {
         Self::UnknownTableName(name.as_ref().to_string())
+    }
+
+    pub fn arc_refs<T>(arc: Arc<T>) -> Self {
+        Self::ArcReferences(Arc::strong_count(&arc), Arc::weak_count(&arc))
     }
 }
 

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
+base64 = "0.22.1"
 chrono = { version = "0.4.41", features = ["serde"] }
 derive_builder = "0.20.2"
 redb = "2.6.0"
