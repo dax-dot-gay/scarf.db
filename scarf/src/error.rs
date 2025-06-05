@@ -15,7 +15,13 @@ pub enum Error {
     UnknownTableName(String),
 
     #[error("More than one strong reference to this Arc exists: {0} strong, {1} weak.")]
-    ArcReferences(usize, usize)
+    ArcReferences(usize, usize),
+
+    #[error("Failed to execute {operation} on {collection}: the current transaction is read-only.")]
+    ReadOnlyTransaction {
+        operation: String,
+        collection: String
+    }
 }
 
 impl Error {
@@ -25,6 +31,10 @@ impl Error {
 
     pub fn arc_refs<T>(arc: Arc<T>) -> Self {
         Self::ArcReferences(Arc::strong_count(&arc), Arc::weak_count(&arc))
+    }
+
+    pub fn read_only(operation: impl AsRef<str>, collection: impl AsRef<str>) -> Self {
+        Self::ReadOnlyTransaction { operation: operation.as_ref().to_string(), collection: collection.as_ref().to_string() }
     }
 }
 

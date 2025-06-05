@@ -1,7 +1,8 @@
+use either::Either;
 use redb::{backends::InMemoryBackend, TableDefinition, TableHandle};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Borrow, collections::HashMap, fmt::Display, marker::PhantomData, ops::Deref, path::{Path, PathBuf}, sync::{Arc, Mutex, RwLock}
+    borrow::Borrow, collections::HashMap, convert::Infallible, fmt::Display, marker::PhantomData, ops::Deref, path::{Path, PathBuf}, sync::{Arc, Mutex, MutexGuard, RwLock}
 };
 
 use crate::document::Document;
@@ -54,12 +55,12 @@ impl Database {
         self.database.clone()
     }
 
-    pub fn reader(&self) -> crate::Result<ReadTransaction> {
-        ReadTransaction::new(self.db())
+    pub fn reader(&self) -> crate::Result<Transaction> {
+        Transaction::reader(self.clone())
     }
 
-    pub fn writer(&self) -> crate::Result<WriteTransaction> {
-        WriteTransaction::new(self.db())
+    pub fn writer(&self) -> crate::Result<Transaction> {
+        Transaction::writer(self.clone())
     }
 
     pub fn collection<T: Document>(&self, name: impl AsRef<str>) -> Collection<T> {
@@ -68,46 +69,23 @@ impl Database {
 }
 
 #[derive(Clone)]
-pub struct WriteTransaction(Arc<Mutex<redb::WriteTransaction>>);
-
-impl WriteTransaction {
-    pub(crate) fn new(db: Arc<RwLock<redb::Database>>) -> crate::Result<Self> {
-        let instance = db.read()?;
-        Ok(Self(Arc::new(Mutex::new(instance.begin_write()?))))
-    }
-
-    pub fn txn(&self) -> Arc<Mutex<redb::WriteTransaction>> {
-        self.0.clone()
-    }
-
-    pub fn commit(self) -> crate::Result<()> {
-        let internal = Arc::try_unwrap(self.0).or_else(|e| Err(crate::Error::arc_refs(e)))?.into_inner()?;
-        Ok(internal.commit()?)
-    }
-
-    pub fn abort(self) -> crate::Result<()> {
-        let internal = Arc::try_unwrap(self.0).or_else(|e| Err(crate::Error::arc_refs(e)))?.into_inner()?;
-        Ok(internal.abort()?)
-    }
+pub enum Transaction {
+    Read(Arc<RwLock<redb::ReadTransaction>>),
+    Write(Arc<Mutex<redb::WriteTransaction>>)
 }
 
-#[derive(Clone)]
-pub struct ReadTransaction(Arc<Mutex<redb::ReadTransaction>>);
-
-impl ReadTransaction {
-    pub(crate) fn new(db: Arc<RwLock<redb::Database>>) -> crate::Result<Self> {
-        let instance = db.read()?;
-        Ok(Self(Arc::new(Mutex::new(instance.begin_read()?))))
+impl Transaction {
+    pub(crate) fn reader(db: Database) -> crate::Result<Self> {
+        let txn = db.db().read()?.begin_read()?;
+        Ok(Self::Read(Arc::new(RwLock::new(txn))))
     }
 
-    pub fn txn(&self) -> Arc<Mutex<redb::ReadTransaction>> {
-        self.0.clone()
+    pub(crate) fn writer(db: Database) -> crate::Result<Self> {
+        let txn = db.db().read()?.begin_write()?;
+        Ok(Self::Write(Arc::new(Mutex::new(txn))))
     }
 
-    pub fn close(self) -> crate::Result<()> {
-        let internal = Arc::try_unwrap(self.0).or_else(|e| Err(crate::Error::arc_refs(e)))?.into_inner()?;
-        Ok(internal.close()?)
-    }
+    
 }
 
 #[derive(Clone, Debug)]
@@ -132,13 +110,48 @@ impl<T: Document> Collection<T> {
         self.collection_name.clone()
     }
 
-    fn index_tables(&self) -> HashMap<String, String> {
+    fn index_table_names(&self) -> HashMap<String, String> {
         let mut results = HashMap::new();
 
         for key in T::index_keys() {
-            results.insert(key.clone(), format!("{}/index/{}", self.name(), key.clone()));
+            results.insert(key.clone(), format!("collections/{}/index/{}", self.name(), key.clone()));
         }
 
         results
+    }
+
+    fn main_table_name(&self) -> String {
+        format!("collections/{}", self.name())
+    }
+
+    pub(crate) fn database(&self) -> Database {
+        self.database.clone()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct CollectionOperation<T: Document> {
+    operation: String,
+    transaction: Transaction,
+    database: Database,
+    collection: Collection<T>
+}
+
+impl<T: Document> CollectionOperation<T> {
+    pub fn new(operation: impl AsRef<str>, collection: &Collection<T>, transaction: &Transaction) -> Self {
+        Self {
+            operation: operation.as_ref().to_string(),
+            transaction: transaction.clone(),
+            database: collection.database(),
+            collection: collection.clone()
+        }
+    }
+
+    pub fn new_reader(operation: impl AsRef<str>, collection: &Collection<T>) -> crate::Result<Self> {
+        Ok(Self::new(operation, collection, &Transaction::reader(collection.database())?))
+    }
+
+    pub fn new_writer(operation: impl AsRef<str>, collection: &Collection<T>) -> crate::Result<Self> {
+        Ok(Self::new(operation, collection, &Transaction::writer(collection.database())?))
     }
 }
